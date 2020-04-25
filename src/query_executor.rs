@@ -5,6 +5,7 @@ use crate::AnySerializable;
 enum State {
     StartMap,
     MapKey,
+    MapKeyStr(String),
     MapValue,
     StructField,
     StructValue,
@@ -29,13 +30,16 @@ impl QueryExecutor {
         }
     }
     fn found_match(&self) -> bool {
+        println!("found_match: {:?}", self.current_path);
         return self.query == self.current_path;
     }
     fn set_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
         if self.result.is_some() {
             Err(QueryExecError::TwoMatchingPaths)
         } else {
-            self.result = Some(serde_json::to_value(found)?);
+            let value = serde_json::to_value(found)?;
+            println!("set_result {:?}", value);
+            self.result = Some(value);
             Ok(())
         }
     }
@@ -124,16 +128,50 @@ impl QueryExecutor {
     fn enter_map_key(&mut self) {
         self.state.push(State::MapKey);
     }
-    fn exit_map_key(&mut self) {
-        let top = self.state.pop();
-        assert_eq!(top, Some(State::MapKey));
+    fn exit_map_key(&mut self) -> Result<(), QueryExecError> {
+        // Leave MapKeyStr on state stack!
+        match self.state.last() {
+            Some(State::MapKeyStr(_)) => Ok(()),
+            _ => Err(QueryExecError::InternalError(format!(
+                "Map key not a simple String! {:?}",
+                self.current_path
+            ))),
+        }
     }
     fn enter_map_value(&mut self) {
+        match self.state.last() {
+            Some(State::MapKeyStr(_)) => {}
+            _ => panic!(
+                "enter_map_value {:?} state={:?}",
+                self.current_path, self.state
+            ),
+        };
         self.state.push(State::MapValue);
     }
-    fn exit_map_value(&mut self) {
-        let top = self.state.pop();
-        assert_eq!(top, Some(State::MapValue));
+    fn exit_map_value(&mut self) -> Result<(), QueryExecError> {
+        match self.state.pop() {
+            Some(State::MapValue) => {}
+            actual => Err(QueryExecError::InternalError(format!(
+                "Expected MapValue state, found: {:?}",
+                actual
+            )))?,
+        }
+        match self.state.pop() {
+            Some(State::MapKeyStr(name)) => {
+                self.exit_name(&name);
+            }
+            actual => Err(QueryExecError::InternalError(format!(
+                "Expected MapKeyStr state, found: {:?}",
+                actual
+            )))?,
+        }
+        match self.state.pop() {
+            Some(State::MapKey) => Ok(()),
+            actual => Err(QueryExecError::InternalError(format!(
+                "Expected MapKey state, found: {:?}",
+                actual
+            )))?,
+        }
     }
 }
 
@@ -262,12 +300,26 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         Ok(())
     }
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        if self.state.last() == Some(&State::MapKey) {
-            self.current_path.push(QueryElement::field(v.into()));
-        } else if self.found_match() {
-            self.set_result(&v.to_string())?;
+        println!(
+            "serialize_str {} @ {:?}, state={:?}",
+            v, self.current_path, self.state
+        );
+        match self.state.last() {
+            Some(State::MapKey) => {
+                self.state.push(State::MapKeyStr(v.to_string()));
+                self.enter_name(v);
+                Ok(())
+            }
+            Some(State::MapKeyStr(_)) | Some(_) => {
+                if self.found_match() {
+                    self.set_result(&v.to_string())?;
+                }
+                Ok(())
+            }
+            Option::None => Err(QueryExecError::InternalError(
+                "&str value with no state!".into(),
+            )),
         }
-        Ok(())
     }
     fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
         todo!()
@@ -411,18 +463,16 @@ impl<'a> serde::ser::SerializeMap for &'a mut QueryExecutor {
         // Serde does not enforce string-only keys, but JSON does.
         // So we have a &T here and not a &str or &String like we'd want for checking.
         self.enter_map_key();
-        let out = key.serialize(&mut **self);
-        self.exit_map_key();
-        out
+        key.serialize(&mut **self)?;
+        self.exit_map_key()
     }
     fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
     {
         self.enter_map_value();
-        let out = value.serialize(&mut **self);
-        self.exit_map_value();
-        out
+        value.serialize(&mut **self)?;
+        self.exit_map_value()
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
         self.exit_map();
