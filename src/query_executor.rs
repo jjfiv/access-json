@@ -16,11 +16,24 @@ enum State {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct LinearResult {
+    /// The relative path to this result from the query.
+    path: Vec<QueryElement>,
+    /// The value element at this path.
+    result: serde_json::Value,
+}
+impl LinearResult {
+    fn new(path: Vec<QueryElement>, result: serde_json::Value) -> Self {
+        Self { path, result }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct QueryExecutor {
     query: Vec<QueryElement>,
     current_path: Vec<QueryElement>,
     state: Vec<State>,
-    result: Option<serde_json::Value>,
+    results: Vec<LinearResult>,
 }
 impl QueryExecutor {
     pub fn new(query: &JSONQuery) -> Self {
@@ -28,12 +41,8 @@ impl QueryExecutor {
             query: query.elements.clone(),
             current_path: Vec::new(),
             state: Vec::new(),
-            result: None,
+            results: Vec::new(),
         }
-    }
-    fn found_match(&self) -> bool {
-        println!("found_match: {:?}", self.current_path);
-        return self.query == self.current_path;
     }
     fn next_step(&self) -> Option<&QueryElement> {
         let mut i = 0;
@@ -45,23 +54,33 @@ impl QueryExecutor {
         }
         self.query.get(i)
     }
-    fn set_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
-        if self.result.is_some() {
-            Err(QueryExecError::TwoMatchingPaths)
-        } else {
-            let value = serde_json::to_value(found)?;
-            self.result = Some(value);
-            Err(QueryExecError::EarlyReturnHack) // Note this is a success condition.
+    /// Find the relative path to our current location, but only if we're matching the query.
+    fn relative_path(&self) -> Option<Vec<QueryElement>> {
+        let mut i = 0;
+        while i < self.query.len() {
+            if i >= self.current_path.len() || self.current_path[i] != self.query[i] {
+                return None;
+            }
+            i += 1;
         }
+        Some(self.current_path[i..].iter().cloned().collect())
+    }
+    fn possible_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
+        if let Some(relative) = self.relative_path() {
+            self.results
+                .push(LinearResult::new(relative, serde_json::to_value(found)?))
+        }
+        Ok(())
     }
     pub fn get_result(self) -> Option<serde_json::Value> {
-        self.result
+        // TODO: merge!
+        self.results.get(0).map(|it| it.result.clone())
     }
 
     /// When we have recursive control over entering a scope or not, only enter if it advances our query match!
     fn enter_name(&mut self, name: &str) -> bool {
         let continues_match = match self.next_step() {
-            Some(QueryElement::AccessField { field }) => name == field,
+            Some(QueryElement::Field(field)) => name == field,
             _ => false,
         };
         if continues_match {
@@ -69,6 +88,7 @@ impl QueryExecutor {
         }
         continues_match
     }
+
     /// Sometimes we do not have control over entering a scope; so we just push without checking whether it advances our match or not.
     fn must_enter_name(&mut self, name: &str) {
         self.current_path.push(QueryElement::field(name));
@@ -79,7 +99,7 @@ impl QueryExecutor {
     }
     fn exit_unknown_name(&mut self) -> Result<(), QueryExecError> {
         match self.current_path.pop() {
-            Some(QueryElement::AccessField { .. }) => Ok(()),
+            Some(QueryElement::Field(_)) => Ok(()),
             e => Err(QueryExecError::InternalError(format!(
                 "Expected Name, but found {:?}; state={:?}",
                 e, self.state
@@ -88,7 +108,7 @@ impl QueryExecutor {
     }
     fn exit_struct(&mut self) -> Result<(), QueryExecError> {
         match self.current_path.pop() {
-            None | Some(QueryElement::AccessField { .. }) => Ok(()),
+            None | Some(QueryElement::Field(_)) => Ok(()),
             e => Err(QueryExecError::InternalError(format!(
                 "Expected Struct Name, but found: {:?}; state={:?}",
                 e, self.state
@@ -262,76 +282,40 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
     type SerializeStructVariant = Self;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&v)?;
-        }
-        Ok(())
+        self.possible_result(&v)
     }
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
         println!(
@@ -344,19 +328,17 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
                 self.must_enter_name(v);
                 Ok(())
             }
-            Some(State::MapKeyStr(_)) | Some(_) => {
-                if self.found_match() {
-                    self.set_result(&v.to_string())?;
-                }
-                Ok(())
-            }
+            Some(State::MapKeyStr(_)) => Err(QueryExecError::InternalError(
+                "Shouldn't see multiple str for the same key!".into(),
+            )),
+            Some(_) => self.possible_result(&v),
             Option::None => Err(QueryExecError::InternalError(
                 "&str value with no state!".into(),
             )),
         }
     }
     fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        unimplemented!()
     }
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         self.serialize_unit()
@@ -368,10 +350,7 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         value.serialize(self)
     }
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        if self.found_match() {
-            self.set_result(&serde_json::Value::Null)?;
-        }
-        Ok(())
+        self.possible_result(&serde_json::Value::Null)
     }
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
         if self.enter_name(name) {

@@ -4,19 +4,16 @@ use serde::Serialize;
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum QueryElement {
-    AccessField { field: String },
-    AccessArrayItem { index: usize },
-    // TODO: AccessArrayLength { name: String },
+    Field(String),
+    ArrayItem(usize),
 }
 
 impl QueryElement {
     pub fn field(field: &str) -> Self {
-        Self::AccessField {
-            field: field.into(),
-        }
+        Self::Field(field.into())
     }
     pub fn array_item(index: usize) -> Self {
-        Self::AccessArrayItem { index }
+        Self::ArrayItem(index)
     }
 }
 
