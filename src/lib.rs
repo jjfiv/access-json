@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate serde_derive;
 
+pub use erased_serde::Serialize as AnySerializable;
+
 pub mod query;
 pub mod query_executor;
 
@@ -16,7 +18,7 @@ mod tests {
         data.insert("hello", 7);
         data.insert("world", 5);
         let world_q = JSONQuery::new(vec![QueryElement::field("world")]);
-        let found = world_q.execute(&data);
+        let found = world_q.execute(&data).expect("No serialization errors.");
         assert_eq!(found, Some(JV::Number(7.into())));
     }
 }

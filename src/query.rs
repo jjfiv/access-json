@@ -1,4 +1,6 @@
-use erased_serde::Serialize as AnySerializable;
+use crate::query_executor::{QueryExecError, QueryExecutor};
+use crate::AnySerializable;
+use serde::Serialize;
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum QueryElement {
@@ -30,12 +32,12 @@ impl JSONQuery {
     pub fn new(elements: Vec<QueryElement>) -> Self {
         Self { elements }
     }
-    pub fn execute(&self, target: &dyn AnySerializable) -> Option<serde_json::Value> {
-        if self.elements.is_empty() {
-            None
-        } else {
-            None
-            //self.execute_recursive(target, self.elements[0], self.elements[1..])
-        }
+    pub fn execute(
+        &self,
+        target: &dyn AnySerializable,
+    ) -> Result<Option<serde_json::Value>, QueryExecError> {
+        let mut runner = QueryExecutor::new(self);
+        target.serialize(&mut runner)?;
+        Ok(runner.get_result())
     }
 }

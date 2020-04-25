@@ -1,28 +1,54 @@
 use crate::query::{JSONQuery, QueryElement};
+use crate::AnySerializable;
+use std::cell::RefCell;
 
 #[derive(Serialize, Deserialize, Debug)]
-struct QueryExecutor {
+pub struct QueryExecutor {
     query: Vec<QueryElement>,
     current_path: Vec<QueryElement>,
+    result: Option<serde_json::Value>,
 }
 impl QueryExecutor {
     pub fn new(query: &JSONQuery) -> Self {
         Self {
             query: query.elements.clone(),
             current_path: Vec::new(),
+            result: None,
         }
     }
     fn found_match(&self) -> bool {
         return self.query == self.current_path;
     }
+    fn set_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
+        if self.result.is_some() {
+            Err(QueryExecError::TwoMatchingPaths)
+        } else {
+            self.result = Some(serde_json::to_value(found)?);
+            Ok(())
+        }
+    }
+    pub fn get_result(self) -> Option<serde_json::Value> {
+        self.result
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum QueryExecError {}
+pub enum QueryExecError {
+    TwoMatchingPaths,
+    InternalError(String),
+    Serialization(String),
+}
+
+impl From<serde_json::Error> for QueryExecError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::InternalError(format!("{:?}", err))
+    }
+}
 
 impl std::fmt::Display for QueryExecError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        write!(f, "{:?}", self)?;
+        Ok(())
     }
 }
 impl std::error::Error for QueryExecError {
@@ -42,11 +68,11 @@ impl serde::ser::Error for QueryExecError {
     where
         T: std::fmt::Display,
     {
-        todo!()
+        QueryExecError::Serialization(format!("{}", msg))
     }
 }
 
-impl serde::Serializer for QueryExecutor {
+impl<'a> serde::Serializer for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
 
@@ -59,7 +85,10 @@ impl serde::Serializer for QueryExecutor {
     type SerializeStructVariant = Self;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
         todo!()
@@ -188,7 +217,7 @@ impl serde::Serializer for QueryExecutor {
     }
 }
 
-impl serde::ser::SerializeSeq for QueryExecutor {
+impl<'a> serde::ser::SerializeSeq for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
 
@@ -203,7 +232,7 @@ impl serde::ser::SerializeSeq for QueryExecutor {
     }
 }
 
-impl serde::ser::SerializeMap for QueryExecutor {
+impl<'a> serde::ser::SerializeMap for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
     fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
@@ -222,7 +251,7 @@ impl serde::ser::SerializeMap for QueryExecutor {
         todo!()
     }
 }
-impl serde::ser::SerializeTuple for QueryExecutor {
+impl<'a> serde::ser::SerializeTuple for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -235,7 +264,7 @@ impl serde::ser::SerializeTuple for QueryExecutor {
         todo!()
     }
 }
-impl serde::ser::SerializeTupleStruct for QueryExecutor {
+impl<'a> serde::ser::SerializeTupleStruct for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -248,7 +277,7 @@ impl serde::ser::SerializeTupleStruct for QueryExecutor {
         todo!()
     }
 }
-impl serde::ser::SerializeTupleVariant for QueryExecutor {
+impl<'a> serde::ser::SerializeTupleVariant for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -261,7 +290,7 @@ impl serde::ser::SerializeTupleVariant for QueryExecutor {
         todo!()
     }
 }
-impl serde::ser::SerializeStruct for QueryExecutor {
+impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
     fn serialize_field<T: ?Sized>(
@@ -278,7 +307,8 @@ impl serde::ser::SerializeStruct for QueryExecutor {
         todo!()
     }
 }
-impl serde::ser::SerializeStructVariant for QueryExecutor {
+
+impl<'a> serde::ser::SerializeStructVariant for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
     fn serialize_field<T: ?Sized>(
