@@ -3,12 +3,14 @@ use crate::AnySerializable;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 enum State {
+    /// When we start serializing a Map element.
     StartMap,
+    /// When we have encountered a Map key but still need to serialize it.
     MapKey,
+    /// When we have encountered a Str in MapKey state.
     MapKeyStr(String),
+    /// When we have the name of the field and begin serializing/visiting the MapValue.
     MapValue,
-    StructField,
-    StructValue,
     /// Keep track of where we are, index of length:
     Sequence(usize, usize),
 }
@@ -63,6 +65,7 @@ impl QueryExecutor {
     fn exit_unknown_name(&mut self) -> Result<(), QueryExecError> {
         match self.current_path.pop() {
             Some(QueryElement::AccessField { .. }) => Ok(()),
+            None => panic!("exit_unknown_name path is None"),
             e => Err(QueryExecError::InternalError(format!(
                 "Expected Name: {:?}",
                 e
@@ -530,6 +533,7 @@ impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
+        println!("serialize_field: {}", key);
         if self.enter_name(key) {
             value.serialize(&mut **self)?;
             self.exit_name(key);
