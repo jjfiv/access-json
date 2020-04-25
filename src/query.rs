@@ -5,7 +5,7 @@ use serde::Serialize;
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum QueryElement {
     AccessField { field: String },
-    AccessArrayItem { name: String, index: usize },
+    AccessArrayItem { index: usize },
     // TODO: AccessArrayLength { name: String },
 }
 
@@ -15,11 +15,8 @@ impl QueryElement {
             field: field.into(),
         }
     }
-    pub fn array_item(field: &str, index: usize) -> Self {
-        Self::AccessArrayItem {
-            name: field.into(),
-            index,
-        }
+    pub fn array_item(index: usize) -> Self {
+        Self::AccessArrayItem { index }
     }
 }
 

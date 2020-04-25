@@ -1,11 +1,22 @@
 use crate::query::{JSONQuery, QueryElement};
 use crate::AnySerializable;
-use std::cell::RefCell;
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+enum State {
+    StartMap,
+    MapKey,
+    MapValue,
+    StructField,
+    StructValue,
+    /// Keep track of where we are, index of length:
+    Sequence(usize, usize),
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct QueryExecutor {
     query: Vec<QueryElement>,
     current_path: Vec<QueryElement>,
+    state: Vec<State>,
     result: Option<serde_json::Value>,
 }
 impl QueryExecutor {
@@ -13,6 +24,7 @@ impl QueryExecutor {
         Self {
             query: query.elements.clone(),
             current_path: Vec::new(),
+            state: Vec::new(),
             result: None,
         }
     }
@@ -29,6 +41,99 @@ impl QueryExecutor {
     }
     pub fn get_result(self) -> Option<serde_json::Value> {
         self.result
+    }
+
+    fn enter_name(&mut self, name: &str) -> bool {
+        self.current_path.push(QueryElement::field(name));
+        // for now, just always true
+        // TODO: only enter structs that are on our query's path!
+        true
+    }
+    fn must_enter_name(&mut self, name: &str) {
+        self.current_path.push(QueryElement::field(name));
+    }
+    fn exit_name(&mut self, name: &str) {
+        let top = self.current_path.pop();
+        assert_eq!(Some(QueryElement::field(name)), top);
+    }
+    fn exit_unknown_name(&mut self) -> Result<(), QueryExecError> {
+        match self.current_path.pop() {
+            Some(QueryElement::AccessField { .. }) => Ok(()),
+            e => Err(QueryExecError::InternalError(format!(
+                "Expected Name: {:?}",
+                e
+            ))),
+        }
+    }
+    fn enter_sequence(&mut self, length: Option<usize>) {
+        self.state.push(State::Sequence(
+            0,
+            length.expect("All sequences have lengths?"),
+        ));
+    }
+    fn sequence_element<T: ?Sized>(&mut self, value: &T) -> Result<(), QueryExecError>
+    where
+        T: serde::ser::Serialize,
+    {
+        let index = match self.state.pop() {
+            Some(State::Sequence(idx, len)) => {
+                assert!(idx < len);
+                self.state.push(State::Sequence(idx + 1, len));
+                idx
+            }
+            _ => panic!("state should be sequence"),
+        };
+        if self.enter_index(index) {
+            let output = value.serialize(&mut *self);
+            self.exit_index(index);
+            output
+        } else {
+            Ok(())
+        }
+    }
+    fn enter_index(&mut self, index: usize) -> bool {
+        self.current_path.push(QueryElement::array_item(index));
+        // for now, just always true
+        // TODO: only enter indices that are on our query's path!
+        true
+    }
+    fn exit_index(&mut self, index: usize) {
+        let top = self.current_path.pop();
+        assert_eq!(Some(QueryElement::array_item(index)), top);
+    }
+    fn exit_sequence(&mut self) -> Result<(), QueryExecError> {
+        let top = self.state.pop();
+        match top {
+            Some(State::Sequence(pos, len)) => {
+                assert_eq!(pos, len);
+                Ok(())
+            }
+            found => Err(QueryExecError::InternalError(format!(
+                "Bad exit_sequence state: {:?}",
+                found
+            ))),
+        }
+    }
+    fn enter_map(&mut self) {
+        self.state.push(State::StartMap);
+    }
+    fn exit_map(&mut self) {
+        let top = self.state.pop();
+        assert_eq!(top, Some(State::StartMap));
+    }
+    fn enter_map_key(&mut self) {
+        self.state.push(State::MapKey);
+    }
+    fn exit_map_key(&mut self) {
+        let top = self.state.pop();
+        assert_eq!(top, Some(State::MapKey));
+    }
+    fn enter_map_value(&mut self) {
+        self.state.push(State::MapValue);
+    }
+    fn exit_map_value(&mut self) {
+        let top = self.state.pop();
+        assert_eq!(top, Some(State::MapValue));
     }
 }
 
@@ -91,129 +196,192 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         Ok(())
     }
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&v)?;
+        }
+        Ok(())
     }
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.state.last() == Some(&State::MapKey) {
+            self.current_path.push(QueryElement::field(v.into()));
+        } else if self.found_match() {
+            self.set_result(&v.to_string())?;
+        }
+        Ok(())
     }
-    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+    fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.serialize_unit()
     }
     fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
     where
         T: serde::Serialize,
     {
-        todo!()
+        value.serialize(self)
     }
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if self.found_match() {
+            self.set_result(&serde_json::Value::Null)?;
+        }
+        Ok(())
     }
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if !self.enter_name(name) {
+            return Ok(());
+        }
+        let output = self.serialize_unit();
+        self.exit_name(name);
+        output
     }
     fn serialize_unit_variant(
         self,
         name: &'static str,
-        variant_index: u32,
+        _variant_index: u32,
         variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        if !self.enter_name(name) {
+            return Ok(());
+        }
+        let output = self.serialize_str(variant);
+        self.exit_name(name);
+        output
     }
     fn serialize_newtype_struct<T: ?Sized>(
         self,
-        name: &'static str,
+        _name: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: serde::Serialize,
     {
-        todo!()
+        // TODO test ignoring names of newtype structs; e.g.,
+        // struct Meters(f64) is serialized as jus ta f64 and we don't care about the name of that type...?
+        value.serialize(&mut *self)
     }
     fn serialize_newtype_variant<T: ?Sized>(
         self,
-        name: &'static str,
-        variant_index: u32,
+        _name: &'static str,
+        _variant_index: u32,
         variant: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: serde::Serialize,
     {
-        todo!()
+        if !self.enter_name(variant) {
+            return Ok(());
+        }
+        let output = value.serialize(&mut *self);
+        self.exit_name(variant);
+        output
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        todo!()
+        self.enter_sequence(len);
+        Ok(self)
     }
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        todo!()
+        self.serialize_seq(Some(len))
     }
     fn serialize_tuple_struct(
         self,
-        name: &'static str,
+        _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        todo!()
+        // TODO: what's a tuple-struct name in JSON output -- should be nothing?
+        self.serialize_seq(Some(len))
     }
     fn serialize_tuple_variant(
         self,
-        name: &'static str,
-        variant_index: u32,
+        _name: &'static str,
+        _variant_index: u32,
         variant: &'static str,
-        len: usize,
+        _len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        todo!()
+        self.must_enter_name(variant);
+        Ok(self)
     }
-    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        todo!()
+    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        self.enter_map();
+        Ok(self)
     }
     fn serialize_struct(
         self,
-        name: &'static str,
+        _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        todo!()
+        self.serialize_map(Some(len))
     }
     fn serialize_struct_variant(
         self,
-        name: &'static str,
-        variant_index: u32,
+        _name: &'static str,
+        _variant_index: u32,
         variant: &'static str,
-        len: usize,
+        _len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        todo!()
+        self.must_enter_name(variant);
+        Ok(self)
     }
 }
 
@@ -225,10 +393,10 @@ impl<'a> serde::ser::SerializeSeq for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        todo!()
+        self.sequence_element(value)
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.exit_sequence()
     }
 }
 
@@ -239,18 +407,29 @@ impl<'a> serde::ser::SerializeMap for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        todo!()
+        // TODO not sure how to check this is a path we want.
+        // Serde does not enforce string-only keys, but JSON does.
+        // So we have a &T here and not a &str or &String like we'd want for checking.
+        self.enter_map_key();
+        let out = key.serialize(&mut **self);
+        self.exit_map_key();
+        out
     }
     fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
     {
-        todo!()
+        self.enter_map_value();
+        let out = value.serialize(&mut **self);
+        self.exit_map_value();
+        out
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.exit_map();
+        Ok(())
     }
 }
+
 impl<'a> serde::ser::SerializeTuple for &'a mut QueryExecutor {
     type Ok = ();
     type Error = QueryExecError;
@@ -258,10 +437,10 @@ impl<'a> serde::ser::SerializeTuple for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        todo!()
+        self.sequence_element(value)
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.exit_sequence()
     }
 }
 impl<'a> serde::ser::SerializeTupleStruct for &'a mut QueryExecutor {
@@ -271,10 +450,10 @@ impl<'a> serde::ser::SerializeTupleStruct for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        todo!()
+        self.sequence_element(value)
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.exit_sequence()
     }
 }
 impl<'a> serde::ser::SerializeTupleVariant for &'a mut QueryExecutor {
@@ -284,10 +463,10 @@ impl<'a> serde::ser::SerializeTupleVariant for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        todo!()
+        self.sequence_element(value)
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.exit_sequence().and_then(|_| self.exit_unknown_name())
     }
 }
 impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
@@ -301,10 +480,14 @@ impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        todo!()
+        if self.enter_name(key) {
+            value.serialize(&mut **self)?;
+            self.exit_name(key);
+        }
+        Ok(())
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.exit_unknown_name()
     }
 }
 
@@ -319,9 +502,13 @@ impl<'a> serde::ser::SerializeStructVariant for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        todo!()
+        if self.enter_name(key) {
+            value.serialize(&mut **self)?;
+            self.exit_name(key);
+        }
+        Ok(())
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.exit_unknown_name()
     }
 }

@@ -19,6 +19,6 @@ mod tests {
         data.insert("world", 5);
         let world_q = JSONQuery::new(vec![QueryElement::field("world")]);
         let found = world_q.execute(&data).expect("No serialization errors.");
-        assert_eq!(found, Some(JV::Number(7.into())));
+        assert_eq!(found, Some(JV::Number(5.into())));
     }
 }
