@@ -84,4 +84,20 @@ mod tests {
         ]);
         assert_eq!("walks", first_favorite_q.execute(&data).unwrap().unwrap());
     }
+
+    /*
+    TODO: support whole objects, going to need special impls of
+    #[test]
+    fn test_whole_object_results() {
+        let data = Example {
+            name: "Buddy".into(),
+            age: 14,
+            favorites: vec!["walks".into(), "naps".into()],
+        };
+
+        let all_favorites = JSONQuery::single(QueryElement::field("favorites"));
+        let expected = JV::Array(vec!["walks".into(), "naps".into()]);
+        assert_eq!(expected, all_favorites.execute(&data).unwrap().unwrap());
+    }
+    */
 }

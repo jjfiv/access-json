@@ -35,26 +35,41 @@ impl QueryExecutor {
         println!("found_match: {:?}", self.current_path);
         return self.query == self.current_path;
     }
+    fn next_step(&self) -> Option<&QueryElement> {
+        let mut i = 0;
+        while i < self.query.len() && i < self.current_path.len() {
+            if self.query[i] != self.current_path[i] {
+                return None;
+            }
+            i += 1;
+        }
+        self.query.get(i)
+    }
     fn set_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
         if self.result.is_some() {
             Err(QueryExecError::TwoMatchingPaths)
         } else {
             let value = serde_json::to_value(found)?;
-            println!("set_result {:?}", value);
             self.result = Some(value);
-            Ok(())
+            Err(QueryExecError::EarlyReturnHack) // Note this is a success condition.
         }
     }
     pub fn get_result(self) -> Option<serde_json::Value> {
         self.result
     }
 
+    /// When we have recursive control over entering a scope or not, only enter if it advances our query match!
     fn enter_name(&mut self, name: &str) -> bool {
-        self.current_path.push(QueryElement::field(name));
-        // for now, just always true
-        // TODO: only enter structs that are on our query's path!
-        true
+        let continues_match = match self.next_step() {
+            Some(QueryElement::AccessField { field }) => name == field,
+            _ => false,
+        };
+        if continues_match {
+            self.current_path.push(QueryElement::field(name));
+        }
+        continues_match
     }
+    /// Sometimes we do not have control over entering a scope; so we just push without checking whether it advances our match or not.
     fn must_enter_name(&mut self, name: &str) {
         self.current_path.push(QueryElement::field(name));
     }
@@ -186,8 +201,11 @@ impl QueryExecutor {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum QueryExecError {
+    /// This error suggests we've found everything we're looking for, and we are abusing Rust's return-flow so that we can return early without visiting any more fields.
+    EarlyReturnHack,
+    /// Given the presence of EarlyReturnHack; this should really never happen :)
     TwoMatchingPaths,
     InternalError(String),
     Serialization(String),
@@ -222,7 +240,12 @@ impl serde::ser::Error for QueryExecError {
     where
         T: std::fmt::Display,
     {
-        QueryExecError::Serialization(format!("{}", msg))
+        // Erased serde brings us here on error.
+        if msg.to_string() == QueryExecError::EarlyReturnHack.to_string() {
+            QueryExecError::EarlyReturnHack
+        } else {
+            QueryExecError::Serialization(msg.to_string())
+        }
     }
 }
 
@@ -318,7 +341,7 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         match self.state.last() {
             Some(State::MapKey) => {
                 self.state.push(State::MapKeyStr(v.to_string()));
-                self.enter_name(v);
+                self.must_enter_name(v);
                 Ok(())
             }
             Some(State::MapKeyStr(_)) | Some(_) => {
@@ -351,12 +374,11 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         Ok(())
     }
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-        if !self.enter_name(name) {
-            return Ok(());
+        if self.enter_name(name) {
+            self.serialize_unit()?;
+            self.exit_name(name);
         }
-        let output = self.serialize_unit();
-        self.exit_name(name);
-        output
+        Ok(())
     }
     fn serialize_unit_variant(
         self,
@@ -364,12 +386,11 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         _variant_index: u32,
         variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        if !self.enter_name(name) {
-            return Ok(());
+        if self.enter_name(name) {
+            self.serialize_str(variant)?;
+            self.exit_name(name);
         }
-        let output = self.serialize_str(variant);
-        self.exit_name(name);
-        output
+        Ok(())
     }
     fn serialize_newtype_struct<T: ?Sized>(
         self,
@@ -393,12 +414,11 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        if !self.enter_name(variant) {
-            return Ok(());
+        if self.enter_name(variant) {
+            value.serialize(&mut *self)?;
+            self.exit_name(variant);
         }
-        let output = value.serialize(&mut *self);
-        self.exit_name(variant);
-        output
+        Ok(())
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         self.enter_sequence(len);

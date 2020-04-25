@@ -37,7 +37,9 @@ impl JSONQuery {
         target: &dyn AnySerializable,
     ) -> Result<Option<serde_json::Value>, QueryExecError> {
         let mut runner = QueryExecutor::new(self);
-        target.serialize(&mut runner)?;
-        Ok(runner.get_result())
+        match target.serialize(&mut runner) {
+            Ok(()) | Err(QueryExecError::EarlyReturnHack) => Ok(runner.get_result()),
+            Err(e) => Err(e),
+        }
     }
 }
