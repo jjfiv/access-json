@@ -65,10 +65,18 @@ impl QueryExecutor {
     fn exit_unknown_name(&mut self) -> Result<(), QueryExecError> {
         match self.current_path.pop() {
             Some(QueryElement::AccessField { .. }) => Ok(()),
-            None => panic!("exit_unknown_name path is None"),
             e => Err(QueryExecError::InternalError(format!(
-                "Expected Name: {:?}",
-                e
+                "Expected Name, but found {:?}; state={:?}",
+                e, self.state
+            ))),
+        }
+    }
+    fn exit_struct(&mut self) -> Result<(), QueryExecError> {
+        match self.current_path.pop() {
+            None | Some(QueryElement::AccessField { .. }) => Ok(()),
+            e => Err(QueryExecError::InternalError(format!(
+                "Expected Struct Name, but found: {:?}; state={:?}",
+                e, self.state
             ))),
         }
     }
@@ -541,7 +549,7 @@ impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        self.exit_unknown_name()
+        self.exit_struct()
     }
 }
 

@@ -29,6 +29,9 @@ impl JSONQuery {
     pub fn new(elements: Vec<QueryElement>) -> Self {
         Self { elements }
     }
+    pub fn single(q: QueryElement) -> Self {
+        Self::new(vec![q])
+    }
     pub fn execute(
         &self,
         target: &dyn AnySerializable,
