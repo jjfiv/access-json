@@ -5,6 +5,10 @@ pub use erased_serde::Serialize as AnySerializable;
 
 pub mod query;
 pub mod query_executor;
+pub mod query_parser;
+
+pub use query::JSONQuery;
+pub use query_parser::parse_query;
 
 #[cfg(test)]
 mod tests {
