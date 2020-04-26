@@ -105,7 +105,7 @@ impl Parser {
             if ch == '.' || ch == '[' {
                 break;
             } else if ch.is_whitespace() {
-                Err(QueryParseErr::BadField(self.position - 1))?;
+                return Err(QueryParseErr::BadField(self.position - 1));
             }
             self.consume(ch)?;
             id.push(ch);

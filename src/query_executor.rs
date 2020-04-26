@@ -37,7 +37,7 @@ impl QueryExecutor {
             results: Vec::new(),
         }
     }
-    fn next_step<'a>(&'a self) -> NextStep<'a> {
+    fn next_step(&self) -> NextStep<'_> {
         let mut i = 0;
         while i < self.query.len() && i < self.current_path.len() {
             if self.query[i] != self.current_path[i] {
@@ -55,7 +55,7 @@ impl QueryExecutor {
     /// Find the relative path to our current location, but only if we're matching the query.
     fn relative_path(&self) -> Option<Vec<QueryElement>> {
         match self.next_step() {
-            NextStep::IsMatch(relative) => Some(relative.iter().cloned().collect()),
+            NextStep::IsMatch(relative) => Some(relative.to_vec()),
             _ => None,
         }
     }
@@ -93,7 +93,7 @@ impl QueryExecutor {
     }
     fn exit_unknown_name(&mut self) -> Result<(), QueryExecError> {
         match self.current_path.pop() {
-            Some(QueryElement::Field(what)) => Ok(()),
+            Some(QueryElement::Field(_what)) => Ok(()),
             e => Err(QueryExecError::InternalError(format!(
                 "Expected Name, but found {:?}; state={:?}",
                 e, self.state
@@ -183,26 +183,30 @@ impl QueryExecutor {
     fn exit_map_value(&mut self) -> Result<(), QueryExecError> {
         match self.state.pop() {
             Some(State::MapValue) => {}
-            actual => Err(QueryExecError::InternalError(format!(
-                "Expected MapValue state, found: {:?}",
-                actual
-            )))?,
+            actual => {
+                return Err(QueryExecError::InternalError(format!(
+                    "Expected MapValue state, found: {:?}",
+                    actual
+                )))
+            }
         }
         match self.state.pop() {
             Some(State::MapKeyStr(name)) => {
                 self.exit_name(&name);
             }
-            actual => Err(QueryExecError::InternalError(format!(
-                "Expected MapKeyStr state, found: {:?}",
-                actual
-            )))?,
+            actual => {
+                return Err(QueryExecError::InternalError(format!(
+                    "Expected MapKeyStr state, found: {:?}",
+                    actual
+                )))
+            }
         }
         match self.state.pop() {
             Some(State::MapKey) => Ok(()),
             actual => Err(QueryExecError::InternalError(format!(
                 "Expected MapKey state, found: {:?}",
                 actual
-            )))?,
+            ))),
         }
     }
 }

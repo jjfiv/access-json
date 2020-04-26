@@ -72,7 +72,7 @@ impl JSONQuery {
         target: &dyn AnySerializable,
     ) -> Result<Vec<LinearResult>, QueryExecError> {
         let mut runner = QueryExecutor::new(self);
-        let () = target.serialize(&mut runner)?;
+        target.serialize(&mut runner)?;
         Ok(runner.get_results())
     }
 
@@ -82,7 +82,7 @@ impl JSONQuery {
         target: &dyn AnySerializable,
     ) -> Result<Option<serde_json::Value>, QueryExecError> {
         let mut runner = QueryExecutor::new(self);
-        let () = target.serialize(&mut runner)?;
+        target.serialize(&mut runner)?;
         let results = runner.get_results();
         match results.len() {
             0 => Ok(None),
