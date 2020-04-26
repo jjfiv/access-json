@@ -14,6 +14,13 @@ enum State {
     /// Keep track of where we are, index of length:
     Sequence(usize, usize),
 }
+
+enum NextStep<'a> {
+    NotMatching,
+    Found(&'a QueryElement),
+    IsMatch(&'a [QueryElement]),
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct QueryExecutor {
     query: Vec<QueryElement>,
@@ -30,26 +37,27 @@ impl QueryExecutor {
             results: Vec::new(),
         }
     }
-    fn next_step(&self) -> Option<&QueryElement> {
+    fn next_step<'a>(&'a self) -> NextStep<'a> {
         let mut i = 0;
         while i < self.query.len() && i < self.current_path.len() {
             if self.query[i] != self.current_path[i] {
-                return None;
+                return NextStep::NotMatching;
             }
             i += 1;
         }
-        self.query.get(i)
+        // we have matched until one of us exhausted (query) or current_path.
+        if self.current_path.len() < self.query.len() {
+            NextStep::Found(&self.query[i])
+        } else {
+            NextStep::IsMatch(&self.current_path[i..])
+        }
     }
     /// Find the relative path to our current location, but only if we're matching the query.
     fn relative_path(&self) -> Option<Vec<QueryElement>> {
-        let mut i = 0;
-        while i < self.query.len() {
-            if i >= self.current_path.len() || self.current_path[i] != self.query[i] {
-                return None;
-            }
-            i += 1;
+        match self.next_step() {
+            NextStep::IsMatch(relative) => Some(relative.iter().cloned().collect()),
+            _ => None,
         }
-        Some(self.current_path[i..].iter().cloned().collect())
     }
     fn possible_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
         if let Some(relative) = self.relative_path() {
@@ -65,7 +73,8 @@ impl QueryExecutor {
     /// When we have recursive control over entering a scope or not, only enter if it advances our query match!
     fn enter_name(&mut self, name: &str) -> bool {
         let continues_match = match self.next_step() {
-            Some(QueryElement::Field(field)) => name == field,
+            NextStep::IsMatch(_) => true,
+            NextStep::Found(QueryElement::Field(field)) => name == field,
             _ => false,
         };
         if continues_match {
@@ -84,18 +93,9 @@ impl QueryExecutor {
     }
     fn exit_unknown_name(&mut self) -> Result<(), QueryExecError> {
         match self.current_path.pop() {
-            Some(QueryElement::Field(_)) => Ok(()),
+            Some(QueryElement::Field(what)) => Ok(()),
             e => Err(QueryExecError::InternalError(format!(
                 "Expected Name, but found {:?}; state={:?}",
-                e, self.state
-            ))),
-        }
-    }
-    fn exit_struct(&mut self) -> Result<(), QueryExecError> {
-        match self.current_path.pop() {
-            None | Some(QueryElement::Field(_)) => Ok(()),
-            e => Err(QueryExecError::InternalError(format!(
-                "Expected Struct Name, but found: {:?}; state={:?}",
                 e, self.state
             ))),
         }
@@ -116,15 +116,16 @@ impl QueryExecutor {
                 self.state.push(State::Sequence(idx + 1, len));
                 idx
             }
-            _ => panic!("state should be sequence"),
+            x => panic!(
+                "state should be sequence but was {:?}; path={:?}",
+                x, self.current_path
+            ),
         };
         if self.enter_index(index) {
-            let output = value.serialize(&mut *self);
+            value.serialize(&mut *self)?;
             self.exit_index(index);
-            output
-        } else {
-            Ok(())
         }
+        Ok(())
     }
     fn enter_index(&mut self, index: usize) -> bool {
         self.current_path.push(QueryElement::array_item(index));
@@ -295,10 +296,6 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         self.possible_result(&v)
     }
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        println!(
-            "serialize_str {} @ {:?}, state={:?}",
-            v, self.current_path, self.state
-        );
         match self.state.last() {
             Some(State::MapKey) => {
                 self.state.push(State::MapKeyStr(v.to_string()));
@@ -517,7 +514,6 @@ impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        println!("serialize_field: {}", key);
         if self.enter_name(key) {
             value.serialize(&mut **self)?;
             self.exit_name(key);
@@ -525,7 +521,8 @@ impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        self.exit_struct()
+        self.exit_map();
+        Ok(())
     }
 }
 

@@ -7,7 +7,7 @@ pub mod query;
 pub mod query_executor;
 pub mod query_parser;
 
-pub use query::JSONQuery;
+pub use query::{JSONQuery, LinearResult};
 pub use query_parser::parse_query;
 
 #[cfg(test)]
@@ -111,5 +111,66 @@ mod tests {
                 .map(|it| it.result)
                 .collect::<Vec<JV>>()
         );
+    }
+
+    #[derive(Serialize)]
+    struct NestedStructs {
+        dog: Example,
+        truthiness: bool,
+        score: i32,
+    }
+
+    #[test]
+    fn test_nested_structs() {
+        let data = NestedStructs {
+            dog: Example {
+                name: "Buddy".into(),
+                age: 14,
+                favorites: vec!["walks".into(), "naps".into()],
+            },
+            truthiness: false,
+            score: -77,
+        };
+
+        assert_eq!(
+            JSONQuery::parse(".dog.name")
+                .unwrap()
+                .execute_for_value(&data)
+                .unwrap()
+                .unwrap(),
+            "Buddy"
+        )
+    }
+
+    #[test]
+    fn test_vec_structs() {
+        let data: Vec<Example> = vec![
+            Example {
+                name: "Buddy".into(),
+                age: 14,
+                favorites: vec![],
+            },
+            Example {
+                name: "Tuukka".into(),
+                age: 6,
+                favorites: vec![],
+            },
+        ];
+        assert_eq!(
+            JSONQuery::parse("[0].name")
+                .unwrap()
+                .execute_for_value(&data)
+                .unwrap()
+                .unwrap(),
+            "Buddy"
+        );
+        assert_eq!(
+            JSONQuery::parse("[1].name")
+                .unwrap()
+                .execute_for_value(&data)
+                .unwrap()
+                .unwrap(),
+            "Tuukka"
+        )
     }
 }
