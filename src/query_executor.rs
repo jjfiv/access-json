@@ -1,4 +1,4 @@
-use crate::query::{JSONQuery, QueryElement};
+use crate::query::{JSONQuery, LinearResult, QueryElement};
 use crate::AnySerializable;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -14,20 +14,6 @@ enum State {
     /// Keep track of where we are, index of length:
     Sequence(usize, usize),
 }
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct LinearResult {
-    /// The relative path to this result from the query.
-    path: Vec<QueryElement>,
-    /// The value element at this path.
-    result: serde_json::Value,
-}
-impl LinearResult {
-    fn new(path: Vec<QueryElement>, result: serde_json::Value) -> Self {
-        Self { path, result }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct QueryExecutor {
     query: Vec<QueryElement>,
@@ -72,9 +58,8 @@ impl QueryExecutor {
         }
         Ok(())
     }
-    pub fn get_result(self) -> Option<serde_json::Value> {
-        // TODO: merge!
-        self.results.get(0).map(|it| it.result.clone())
+    pub fn get_results(self) -> Vec<LinearResult> {
+        self.results
     }
 
     /// When we have recursive control over entering a scope or not, only enter if it advances our query match!
@@ -223,10 +208,6 @@ impl QueryExecutor {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum QueryExecError {
-    /// This error suggests we've found everything we're looking for, and we are abusing Rust's return-flow so that we can return early without visiting any more fields.
-    EarlyReturnHack,
-    /// Given the presence of EarlyReturnHack; this should really never happen :)
-    TwoMatchingPaths,
     InternalError(String),
     Serialization(String),
 }
@@ -260,12 +241,8 @@ impl serde::ser::Error for QueryExecError {
     where
         T: std::fmt::Display,
     {
-        // Erased serde brings us here on error.
-        if msg.to_string() == QueryExecError::EarlyReturnHack.to_string() {
-            QueryExecError::EarlyReturnHack
-        } else {
-            QueryExecError::Serialization(msg.to_string())
-        }
+        // Note: erased_serde brings us here on error.
+        QueryExecError::Serialization(msg.to_string())
     }
 }
 
