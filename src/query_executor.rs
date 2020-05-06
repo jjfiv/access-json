@@ -55,23 +55,27 @@ impl OutputStackFrame {
         }
     }
     fn push_item(&mut self, item: JSON) {
-        assert_ne!(self.kind, ElementKind::Map);
+        println!("push_item: {}", item);
+        debug_assert_ne!(self.kind, ElementKind::Map);
         self.kind = ElementKind::List;
         self.list_items.push(item);
     }
     fn push_key(&mut self, item: String) {
-        assert_ne!(self.kind, ElementKind::List);
+        println!("push_key: {}", item);
+        debug_assert_ne!(self.kind, ElementKind::List);
         self.kind = ElementKind::Map;
         self.map_keys.push(item);
     }
     fn push_value(&mut self, item: JSON) {
-        assert_ne!(self.kind, ElementKind::List);
+        println!("push_value: {}", item);
+        debug_assert_ne!(self.kind, ElementKind::List);
         self.kind = ElementKind::Map;
         self.map_values.push(item);
     }
     /// When we've wrapped the level above us, hope we know what type of thing we are!
     fn push(&mut self, complex: OutputStackFrame) {
         let value = complex.finish();
+        println!("push_stack_frame: {}", value);
         match self.kind {
             ElementKind::Root => self.push_item(value),
             ElementKind::List => self.push_item(value),
@@ -83,7 +87,7 @@ impl OutputStackFrame {
             ElementKind::Root => panic!("What's a ROOT? {:?}", self),
             ElementKind::List => JSON::Array(self.list_items),
             ElementKind::Map => {
-                assert_eq!(self.map_values.len(), self.map_values.len());
+                debug_assert_eq!(self.map_values.len(), self.map_values.len());
                 let dict: serde_json::Map<String, JSON> = self
                     .map_keys
                     .into_iter()
@@ -161,7 +165,7 @@ impl QueryExecutor {
         Ok(())
     }
     pub fn get_result(self) -> Option<JSON> {
-        assert_eq!(self.output.len(), 1);
+        debug_assert_eq!(self.output.len(), 1);
         let output = &self.output[0];
         match output.kind {
             ElementKind::Root => output.list_items.get(0).cloned(),
@@ -195,17 +199,15 @@ impl QueryExecutor {
             self.output.last_mut().unwrap().push_key(name.to_owned());
         }
     }
-    fn exit_name(&mut self, name: &str) {
-        if self.is_match() && self.output.len() > 1 {
-            // pop output stack and treat it as a value!
-            let top = self.output.pop().unwrap();
-            self.output.last_mut().unwrap().push(top);
-        }
+    fn exit_name(&mut self, name: Option<&str>) {
         let top = self.current_path.pop();
-        assert_eq!(Some(QueryElement::field(name)), top);
+        if let Some(name) = name {
+            debug_assert_eq!(Some(QueryElement::field(name)), top);
+        }
     }
     fn enter_sequence(&mut self, length: Option<usize>) {
         if self.is_match() {
+            println!("enter_sequence! {:?}", self.current_path);
             self.output.push(OutputStackFrame::list());
         }
         self.state.push(State::Sequence(
@@ -242,13 +244,15 @@ impl QueryExecutor {
             NextStep::IsMatch(_) => true,
         };
         if should_enter {
+            println!("enter_index {}", index);
             self.current_path.push(QueryElement::array_item(index));
         }
         should_enter
     }
     fn exit_index(&mut self, index: usize) {
+        println!("{:?} {:?}", self.current_path, self.state);
         let top = self.current_path.pop();
-        assert_eq!(Some(QueryElement::array_item(index)), top);
+        debug_assert_eq!(Some(QueryElement::array_item(index)), top);
     }
     fn exit_sequence(&mut self) -> Result<(), QueryExecError> {
         if self.is_match() {
@@ -259,7 +263,7 @@ impl QueryExecutor {
         let top = self.state.pop();
         match top {
             Some(State::Sequence(pos, len)) => {
-                assert_eq!(pos, len);
+                debug_assert_eq!(pos, len);
                 Ok(())
             }
             found => Err(QueryExecError::InternalError(format!(
@@ -270,13 +274,19 @@ impl QueryExecutor {
     }
     fn enter_map(&mut self) {
         if self.is_match() {
+            println!("enter_map! {:?}", self.current_path);
             self.output.push(OutputStackFrame::map());
         }
         self.state.push(State::StartMap);
     }
     fn exit_map(&mut self) {
+        if self.is_match() && self.output.len() > 1 {
+            // pop output stack and treat it as a value!
+            let top = self.output.pop().unwrap();
+            self.output.last_mut().unwrap().push(top);
+        }
         let top = self.state.pop();
-        assert_eq!(top, Some(State::StartMap));
+        debug_assert_eq!(top, Some(State::StartMap));
     }
     fn enter_map_key(&mut self) {
         self.state.push(State::MapKey);
@@ -313,7 +323,7 @@ impl QueryExecutor {
         }
         match self.state.pop() {
             Some(State::MapKeyStr(name)) => {
-                self.exit_name(&name);
+                self.exit_name(Some(&name));
             }
             actual => {
                 return Err(QueryExecError::InternalError(format!(
@@ -455,20 +465,20 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
         if self.enter_name(name) {
             self.serialize_unit()?;
-            self.exit_name(name);
+            self.exit_name(Some(name));
         }
         Ok(())
     }
+
     fn serialize_unit_variant(
         self,
-        name: &'static str,
+        _name: &'static str,
         _variant_index: u32,
         variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        if self.enter_name(name) {
-            self.serialize_str(variant)?;
-            self.exit_name(name);
-        }
+        // For unit variants of enums, we/serde serialize them as just a String.
+        // See test_enum_examples; Pet::Bird.
+        self.serialize_str(variant)?;
         Ok(())
     }
     fn serialize_newtype_struct<T: ?Sized>(
@@ -495,7 +505,7 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
     {
         if self.enter_name(variant) {
             value.serialize(&mut *self)?;
-            self.exit_name(variant);
+            self.exit_name(Some(variant));
         }
         Ok(())
     }
@@ -646,7 +656,7 @@ impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
     {
         if self.enter_name(key) {
             value.serialize(&mut **self)?;
-            self.exit_name(key);
+            self.exit_name(Some(key));
         }
         Ok(())
     }
@@ -669,12 +679,17 @@ impl<'a> serde::ser::SerializeStructVariant for &'a mut QueryExecutor {
     {
         if self.enter_name(key) {
             value.serialize(&mut **self)?;
-            self.exit_name(key);
+            self.exit_name(Some(key));
         }
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
         self.exit_map();
+        self.exit_name(None);
+        println!(
+            "exit_struct_variant: {:?}, {:?}",
+            self.state, self.current_path
+        );
         Ok(())
     }
 }

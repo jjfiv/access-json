@@ -62,7 +62,7 @@ mod tests {
         assert_eq!(None, found);
     }
 
-    #[derive(Serialize)]
+    #[derive(PartialEq, Eq, Clone, Serialize)]
     struct Example {
         name: String,
         age: i32,
@@ -131,6 +131,14 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             "Buddy"
+        );
+        assert_eq!(
+            JSONQuery::parse(".truthiness")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap(),
+            false
         )
     }
 
@@ -164,5 +172,65 @@ mod tests {
                 .unwrap(),
             "Tuukka"
         )
+    }
+
+    #[derive(Serialize)]
+    enum Pet {
+        Bird,
+        Dog(Example),
+        Cat { lives: u32 },
+    }
+
+    #[test]
+    fn test_enum_examples() {
+        let buddy = Example {
+            name: "Buddy".into(),
+            age: 14,
+            favorites: vec!["walks".into(), "naps".into()],
+        };
+        let data = vec![Pet::Bird, Pet::Dog(buddy.clone()), Pet::Cat { lives: 9 }];
+        // For debugging:
+        //println!("json: {}", serde_json::to_string_pretty(&data).unwrap());
+
+        assert_eq!(
+            "Bird",
+            JSONQuery::parse("[0]")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            14,
+            JSONQuery::parse("[1].Dog.age")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(buddy).unwrap(),
+            JSONQuery::parse("[1].Dog")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            "Bird",
+            JSONQuery::parse("[0]")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            9,
+            JSONQuery::parse("[2].Cat.lives")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
     }
 }
