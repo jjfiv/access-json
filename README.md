@@ -1,4 +1,4 @@
-# access-json
+# access-json ![Rust](https://github.com/jjfiv/access-json/workflows/Rust/badge.svg)
 
 Hijack serde to query large nested structures in Rust. For low-effort, read-only FFI.
 
