@@ -179,6 +179,7 @@ mod tests {
         Bird,
         Dog(Example),
         Cat { lives: u32 },
+        Digits(u32, u32, u32),
     }
 
     #[test]
@@ -188,7 +189,12 @@ mod tests {
             age: 14,
             favorites: vec!["walks".into(), "naps".into()],
         };
-        let data = vec![Pet::Bird, Pet::Dog(buddy.clone()), Pet::Cat { lives: 9 }];
+        let data = vec![
+            Pet::Bird,
+            Pet::Dog(buddy.clone()),
+            Pet::Cat { lives: 9 },
+            Pet::Digits(7, 5, 6),
+        ];
         // For debugging:
         //println!("json: {}", serde_json::to_string_pretty(&data).unwrap());
 
@@ -227,6 +233,39 @@ mod tests {
         assert_eq!(
             9,
             JSONQuery::parse("[2].Cat.lives")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(vec![7, 5, 6]).unwrap(),
+            JSONQuery::parse("[3].Digits")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+    }
+
+    // tuple-struct
+    #[derive(Serialize)]
+    struct Point(u32, u32);
+
+    #[test]
+    fn test_tuple_struct() {
+        let data = vec![Point(1, 2), Point(3, 4)];
+        assert_eq!(
+            serde_json::to_value(vec![1, 2]).unwrap(),
+            JSONQuery::parse("[0]")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            4,
+            JSONQuery::parse("[1][1]")
                 .unwrap()
                 .execute(&data)
                 .unwrap()

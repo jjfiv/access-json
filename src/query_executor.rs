@@ -529,10 +529,12 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         _name: &'static str,
         _variant_index: u32,
         variant: &'static str,
-        _len: usize,
+        len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         self.enter_map();
         self.must_enter_name(variant);
+        self.enter_sequence(Some(len));
+        println!("enter_tuple_variant");
         Ok(self)
     }
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
@@ -640,6 +642,7 @@ impl<'a> serde::ser::SerializeTupleVariant for &'a mut QueryExecutor {
     fn end(self) -> Result<Self::Ok, Self::Error> {
         self.exit_sequence()?;
         self.exit_map();
+        self.exit_name(None);
         Ok(())
     }
 }
