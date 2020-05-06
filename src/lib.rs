@@ -103,13 +103,12 @@ mod tests {
         let all_favorites = JSONQuery::single(QueryElement::field("favorites"));
         let expected: Vec<JV> = vec!["walks".into(), "naps".into()];
         assert_eq!(
-            expected,
+            Some(&expected),
             all_favorites
-                .search(&data)
+                .execute_for_value(&data)
                 .unwrap()
-                .into_iter()
-                .map(|it| it.result)
-                .collect::<Vec<JV>>()
+                .unwrap()
+                .as_array()
         );
     }
 

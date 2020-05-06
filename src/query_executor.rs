@@ -1,5 +1,6 @@
 use crate::query::{JSONQuery, LinearResult, QueryElement};
 use crate::AnySerializable;
+use serde_json::Value as JSON;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 enum State {
@@ -15,6 +16,91 @@ enum State {
     Sequence(usize, usize),
 }
 
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize)]
+enum ElementKind {
+    Root,
+    List,
+    Map,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OutputStackFrame {
+    kind: ElementKind,
+    list_items: Vec<JSON>,
+    map_keys: Vec<String>,
+    map_values: Vec<JSON>,
+}
+
+impl Default for OutputStackFrame {
+    fn default() -> Self {
+        Self {
+            kind: ElementKind::Root,
+            list_items: Vec::new(),
+            map_keys: Vec::new(),
+            map_values: Vec::new(),
+        }
+    }
+}
+impl OutputStackFrame {
+    fn list() -> OutputStackFrame {
+        Self {
+            kind: ElementKind::List,
+            ..Default::default()
+        }
+    }
+    fn map() -> OutputStackFrame {
+        Self {
+            kind: ElementKind::Map,
+            ..Default::default()
+        }
+    }
+    fn push_item(&mut self, item: JSON) {
+        if self.kind == ElementKind::Map {
+            panic!("Programming Error!");
+        }
+        self.kind = ElementKind::List;
+        self.list_items.push(item);
+    }
+    fn push_key(&mut self, item: String) {
+        if self.kind == ElementKind::List {
+            panic!("Programming Error!");
+        }
+        self.kind = ElementKind::Map;
+        self.map_keys.push(item);
+    }
+    fn push_value(&mut self, item: JSON) {
+        if self.kind == ElementKind::List {
+            panic!("Programming Error!");
+        }
+        self.kind = ElementKind::Map;
+        self.map_values.push(item);
+    }
+    /// When we've wrapped the level above us, hope we know what type of thing we are!
+    fn push(&mut self, complex: OutputStackFrame) {
+        let value = complex.finish();
+        match self.kind {
+            ElementKind::Root => self.push_item(value),
+            ElementKind::List => self.push_item(value),
+            ElementKind::Map => self.push_value(value),
+        }
+    }
+    fn finish(self) -> JSON {
+        match self.kind {
+            ElementKind::Root => panic!("What's a ROOT? {:?}", self),
+            ElementKind::List => JSON::Array(self.list_items),
+            ElementKind::Map => {
+                assert_eq!(self.map_values.len(), self.map_values.len());
+                let dict: serde_json::Map<String, JSON> = self
+                    .map_keys
+                    .into_iter()
+                    .zip(self.map_values.into_iter())
+                    .collect();
+                JSON::Object(dict)
+            }
+        }
+    }
+}
+
 enum NextStep<'a> {
     NotMatching,
     Found(&'a QueryElement),
@@ -27,15 +113,18 @@ pub struct QueryExecutor {
     current_path: Vec<QueryElement>,
     state: Vec<State>,
     results: Vec<LinearResult>,
+    output: Vec<OutputStackFrame>,
 }
 impl QueryExecutor {
-    pub fn new(query: &JSONQuery) -> Self {
-        Self {
+    pub fn new(query: &JSONQuery) -> Result<Self, QueryExecError> {
+        Ok(Self {
             query: query.elements.clone(),
             current_path: Vec::new(),
             state: Vec::new(),
             results: Vec::new(),
-        }
+            // Keep a list on the bottom of the stack for single-value answers.
+            output: vec![Default::default()],
+        })
     }
     fn next_step(&self) -> NextStep<'_> {
         let mut i = 0;
@@ -59,21 +148,50 @@ impl QueryExecutor {
             _ => None,
         }
     }
+    fn is_match(&self) -> bool {
+        self.relative_path().is_some()
+    }
     fn possible_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
         if let Some(relative) = self.relative_path() {
             self.results
-                .push(LinearResult::new(relative, serde_json::to_value(found)?))
+                .push(LinearResult::new(relative, serde_json::to_value(found)?));
+            let output_frame = self.output.last_mut().unwrap();
+            match self.state.last().unwrap() {
+                State::MapKey | State::MapKeyStr(_) => panic!(
+                    "Shouldn't call possible_result here! {:?}, {:?}",
+                    self.state, self.current_path
+                ),
+                // StartMap is the state in which we visit struct fields.
+                State::StartMap | State::MapValue => {
+                    output_frame.push_value(serde_json::to_value(found)?)
+                }
+                State::Sequence(_, _) => output_frame.push_item(serde_json::to_value(found)?),
+            };
         }
         Ok(())
     }
     pub fn get_results(self) -> Vec<LinearResult> {
+        assert_eq!(self.output.len(), 1);
         self.results
+    }
+    pub fn get_result(self) -> Option<JSON> {
+        assert_eq!(self.output.len(), 1);
+        let output = &self.output[0];
+        match output.kind {
+            ElementKind::Root => output.list_items.get(0).cloned(),
+            ElementKind::List => output.list_items.get(0).cloned(),
+            ElementKind::Map => output.map_values.get(0).cloned(),
+        }
     }
 
     /// When we have recursive control over entering a scope or not, only enter if it advances our query match!
     fn enter_name(&mut self, name: &str) -> bool {
         let continues_match = match self.next_step() {
-            NextStep::IsMatch(_) => true,
+            NextStep::IsMatch(_) => {
+                // write this name to output.
+                self.output.last_mut().unwrap().push_key(name.to_owned());
+                true
+            }
             NextStep::Found(QueryElement::Field(field)) => name == field,
             _ => false,
         };
@@ -82,25 +200,28 @@ impl QueryExecutor {
         }
         continues_match
     }
-
     /// Sometimes we do not have control over entering a scope; so we just push without checking whether it advances our match or not.
     fn must_enter_name(&mut self, name: &str) {
         self.current_path.push(QueryElement::field(name));
+        if self.is_match() {
+            // write this name to output.
+            println!("{:?}\t{:?}", self.state, self.current_path);
+            self.output.last_mut().unwrap().push_key(name.to_owned());
+        }
     }
     fn exit_name(&mut self, name: &str) {
+        if self.is_match() && self.output.len() > 1 {
+            // pop output stack and treat it as a value!
+            let top = self.output.pop().unwrap();
+            self.output.last_mut().unwrap().push(top);
+        }
         let top = self.current_path.pop();
         assert_eq!(Some(QueryElement::field(name)), top);
     }
-    fn exit_unknown_name(&mut self) -> Result<(), QueryExecError> {
-        match self.current_path.pop() {
-            Some(QueryElement::Field(_what)) => Ok(()),
-            e => Err(QueryExecError::InternalError(format!(
-                "Expected Name, but found {:?}; state={:?}",
-                e, self.state
-            ))),
-        }
-    }
     fn enter_sequence(&mut self, length: Option<usize>) {
+        if self.is_match() {
+            self.output.push(OutputStackFrame::list());
+        }
         self.state.push(State::Sequence(
             0,
             length.expect("All sequences have lengths?"),
@@ -128,16 +249,27 @@ impl QueryExecutor {
         Ok(())
     }
     fn enter_index(&mut self, index: usize) -> bool {
-        self.current_path.push(QueryElement::array_item(index));
-        // for now, just always true
-        // TODO: only enter indices that are on our query's path!
-        true
+        let should_enter = match self.next_step() {
+            NextStep::NotMatching => false,
+            NextStep::Found(QueryElement::ArrayItem(x)) => (index == *x),
+            NextStep::Found(_) => false,
+            NextStep::IsMatch(_) => true,
+        };
+        if should_enter {
+            self.current_path.push(QueryElement::array_item(index));
+        }
+        should_enter
     }
     fn exit_index(&mut self, index: usize) {
         let top = self.current_path.pop();
         assert_eq!(Some(QueryElement::array_item(index)), top);
     }
     fn exit_sequence(&mut self) -> Result<(), QueryExecError> {
+        if self.is_match() {
+            // pop output stack and treat it as a value!
+            let top = self.output.pop().unwrap();
+            self.output.last_mut().unwrap().push(top);
+        }
         let top = self.state.pop();
         match top {
             Some(State::Sequence(pos, len)) => {
@@ -151,6 +283,9 @@ impl QueryExecutor {
         }
     }
     fn enter_map(&mut self) {
+        if self.is_match() {
+            self.output.push(OutputStackFrame::map());
+        }
         self.state.push(State::StartMap);
     }
     fn exit_map(&mut self) {
@@ -213,6 +348,7 @@ impl QueryExecutor {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum QueryExecError {
+    EmptyQuery,
     InternalError(String),
     Serialization(String),
 }
@@ -399,6 +535,7 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        self.enter_map();
         self.must_enter_name(variant);
         Ok(self)
     }
@@ -420,6 +557,7 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        self.enter_map();
         self.must_enter_name(variant);
         Ok(self)
     }
@@ -504,7 +642,9 @@ impl<'a> serde::ser::SerializeTupleVariant for &'a mut QueryExecutor {
         self.sequence_element(value)
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        self.exit_sequence().and_then(|_| self.exit_unknown_name())
+        self.exit_sequence()?;
+        self.exit_map();
+        Ok(())
     }
 }
 impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
@@ -548,6 +688,7 @@ impl<'a> serde::ser::SerializeStructVariant for &'a mut QueryExecutor {
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        self.exit_unknown_name()
+        self.exit_map();
+        Ok(())
     }
 }
