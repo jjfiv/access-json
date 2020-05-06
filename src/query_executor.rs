@@ -1,4 +1,4 @@
-use crate::query::{JSONQuery, LinearResult, QueryElement};
+use crate::query::{JSONQuery, QueryElement};
 use crate::AnySerializable;
 use serde_json::Value as JSON;
 
@@ -55,23 +55,17 @@ impl OutputStackFrame {
         }
     }
     fn push_item(&mut self, item: JSON) {
-        if self.kind == ElementKind::Map {
-            panic!("Programming Error!");
-        }
+        assert_ne!(self.kind, ElementKind::Map);
         self.kind = ElementKind::List;
         self.list_items.push(item);
     }
     fn push_key(&mut self, item: String) {
-        if self.kind == ElementKind::List {
-            panic!("Programming Error!");
-        }
+        assert_ne!(self.kind, ElementKind::List);
         self.kind = ElementKind::Map;
         self.map_keys.push(item);
     }
     fn push_value(&mut self, item: JSON) {
-        if self.kind == ElementKind::List {
-            panic!("Programming Error!");
-        }
+        assert_ne!(self.kind, ElementKind::List);
         self.kind = ElementKind::Map;
         self.map_values.push(item);
     }
@@ -112,7 +106,6 @@ pub struct QueryExecutor {
     query: Vec<QueryElement>,
     current_path: Vec<QueryElement>,
     state: Vec<State>,
-    results: Vec<LinearResult>,
     output: Vec<OutputStackFrame>,
 }
 impl QueryExecutor {
@@ -121,7 +114,6 @@ impl QueryExecutor {
             query: query.elements.clone(),
             current_path: Vec::new(),
             state: Vec::new(),
-            results: Vec::new(),
             // Keep a list on the bottom of the stack for single-value answers.
             output: vec![Default::default()],
         })
@@ -152,9 +144,7 @@ impl QueryExecutor {
         self.relative_path().is_some()
     }
     fn possible_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
-        if let Some(relative) = self.relative_path() {
-            self.results
-                .push(LinearResult::new(relative, serde_json::to_value(found)?));
+        if self.is_match() {
             let output_frame = self.output.last_mut().unwrap();
             match self.state.last().unwrap() {
                 State::MapKey | State::MapKeyStr(_) => panic!(
@@ -169,10 +159,6 @@ impl QueryExecutor {
             };
         }
         Ok(())
-    }
-    pub fn get_results(self) -> Vec<LinearResult> {
-        assert_eq!(self.output.len(), 1);
-        self.results
     }
     pub fn get_result(self) -> Option<JSON> {
         assert_eq!(self.output.len(), 1);

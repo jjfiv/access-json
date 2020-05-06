@@ -7,7 +7,7 @@ pub mod query;
 pub mod query_executor;
 pub mod query_parser;
 
-pub use query::{JSONQuery, LinearResult};
+pub use query::JSONQuery;
 pub use query_parser::parse_query;
 
 #[cfg(test)]
@@ -22,11 +22,11 @@ mod tests {
         data.insert("hello", 7);
         data.insert("world", 5);
         let world_q = JSONQuery::single(QueryElement::field("world"));
-        let found = world_q.execute_for_value(&data).unwrap();
+        let found = world_q.execute(&data).unwrap();
         assert_eq!(found, Some(JV::Number(5.into())));
 
         let hello_q = JSONQuery::single(QueryElement::field("hello"));
-        let found = hello_q.execute_for_value(&data).unwrap();
+        let found = hello_q.execute(&data).unwrap();
         assert_eq!(found, Some(JV::Number(7.into())));
     }
 
@@ -36,12 +36,12 @@ mod tests {
 
         for i in 0..data.len() {
             let elem_q = JSONQuery::single(QueryElement::array_item(i));
-            let found = elem_q.execute_for_value(&data).unwrap().unwrap();
+            let found = elem_q.execute(&data).unwrap().unwrap();
             assert_eq!(found, (JV::Number(i.into())));
         }
 
         let missing_q = JSONQuery::single(QueryElement::array_item(17));
-        let found = missing_q.execute_for_value(&data).unwrap();
+        let found = missing_q.execute(&data).unwrap();
         assert_eq!(None, found);
     }
 
@@ -50,15 +50,15 @@ mod tests {
         let point = (17, 39);
 
         let first_q = JSONQuery::single(QueryElement::array_item(0));
-        let found = first_q.execute_for_value(&point).unwrap().unwrap();
+        let found = first_q.execute(&point).unwrap().unwrap();
         assert_eq!(found, (JV::Number(17.into())));
 
         let second_q = JSONQuery::single(QueryElement::array_item(1));
-        let found = second_q.execute_for_value(&point).unwrap().unwrap();
+        let found = second_q.execute(&point).unwrap().unwrap();
 
         assert_eq!(found, (JV::Number(39.into())));
         let missing_q = JSONQuery::single(QueryElement::array_item(3));
-        let found = missing_q.execute_for_value(&point).unwrap();
+        let found = missing_q.execute(&point).unwrap();
         assert_eq!(None, found);
     }
 
@@ -78,18 +78,15 @@ mod tests {
         };
 
         let name_q = JSONQuery::single(QueryElement::field("name"));
-        assert_eq!("Buddy", name_q.execute_for_value(&data).unwrap().unwrap());
+        assert_eq!("Buddy", name_q.execute(&data).unwrap().unwrap());
         let age_q = JSONQuery::single(QueryElement::field("age"));
-        assert_eq!(14, age_q.execute_for_value(&data).unwrap().unwrap());
+        assert_eq!(14, age_q.execute(&data).unwrap().unwrap());
 
         let first_favorite_q = JSONQuery::new(vec![
             QueryElement::field("favorites"),
             QueryElement::array_item(0),
         ]);
-        assert_eq!(
-            "walks",
-            first_favorite_q.execute_for_value(&data).unwrap().unwrap()
-        );
+        assert_eq!("walks", first_favorite_q.execute(&data).unwrap().unwrap());
     }
 
     #[test]
@@ -104,11 +101,7 @@ mod tests {
         let expected: Vec<JV> = vec!["walks".into(), "naps".into()];
         assert_eq!(
             Some(&expected),
-            all_favorites
-                .execute_for_value(&data)
-                .unwrap()
-                .unwrap()
-                .as_array()
+            all_favorites.execute(&data).unwrap().unwrap().as_array()
         );
     }
 
@@ -134,7 +127,7 @@ mod tests {
         assert_eq!(
             JSONQuery::parse(".dog.name")
                 .unwrap()
-                .execute_for_value(&data)
+                .execute(&data)
                 .unwrap()
                 .unwrap(),
             "Buddy"
@@ -158,7 +151,7 @@ mod tests {
         assert_eq!(
             JSONQuery::parse("[0].name")
                 .unwrap()
-                .execute_for_value(&data)
+                .execute(&data)
                 .unwrap()
                 .unwrap(),
             "Buddy"
@@ -166,7 +159,7 @@ mod tests {
         assert_eq!(
             JSONQuery::parse("[1].name")
                 .unwrap()
-                .execute_for_value(&data)
+                .execute(&data)
                 .unwrap()
                 .unwrap(),
             "Tuukka"

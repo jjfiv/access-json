@@ -3,20 +3,6 @@ use crate::query_parser::{parse_query, QueryParseErr};
 use crate::AnySerializable;
 use serde::Serialize;
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct LinearResult {
-    /// The relative path to this result from the query.
-    pub path: Vec<QueryElement>,
-    /// The value element at this path.
-    pub result: serde_json::Value,
-}
-
-impl LinearResult {
-    pub(crate) fn new(path: Vec<QueryElement>, result: serde_json::Value) -> Self {
-        Self { path, result }
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 pub enum QueryElement {
     Field(String),
@@ -63,21 +49,13 @@ impl JSONQuery {
             elements: parse_query(input)?,
         })
     }
+
     #[cfg(test)]
     pub fn single(q: QueryElement) -> Self {
         Self::new(vec![q])
     }
-    pub fn search(
-        &self,
-        target: &dyn AnySerializable,
-    ) -> Result<Vec<LinearResult>, QueryExecError> {
-        let mut runner = QueryExecutor::new(self)?;
-        target.serialize(&mut runner)?;
-        Ok(runner.get_results())
-    }
 
-    #[cfg(test)]
-    pub fn execute_for_value(
+    pub fn execute(
         &self,
         target: &dyn AnySerializable,
     ) -> Result<Option<serde_json::Value>, QueryExecError> {
