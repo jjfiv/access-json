@@ -55,19 +55,16 @@ impl OutputStackFrame {
         }
     }
     fn push_item(&mut self, item: JSON) {
-        println!("push_item: {}", item);
         debug_assert_ne!(self.kind, ElementKind::Map);
         self.kind = ElementKind::List;
         self.list_items.push(item);
     }
     fn push_key(&mut self, item: String) {
-        println!("push_key: {}", item);
         debug_assert_ne!(self.kind, ElementKind::List);
         self.kind = ElementKind::Map;
         self.map_keys.push(item);
     }
     fn push_value(&mut self, item: JSON) {
-        println!("push_value: {}", item);
         debug_assert_ne!(self.kind, ElementKind::List);
         self.kind = ElementKind::Map;
         self.map_values.push(item);
@@ -75,7 +72,6 @@ impl OutputStackFrame {
     /// When we've wrapped the level above us, hope we know what type of thing we are!
     fn push(&mut self, complex: OutputStackFrame) {
         let value = complex.finish();
-        println!("push_stack_frame: {}", value);
         match self.kind {
             ElementKind::Root => self.push_item(value),
             ElementKind::List => self.push_item(value),
@@ -195,7 +191,6 @@ impl QueryExecutor {
         self.current_path.push(QueryElement::field(name));
         if self.is_match() {
             // write this name to output.
-            println!("{:?}\t{:?}", self.state, self.current_path);
             self.output.last_mut().unwrap().push_key(name.to_owned());
         }
     }
@@ -207,7 +202,6 @@ impl QueryExecutor {
     }
     fn enter_sequence(&mut self, length: Option<usize>) {
         if self.is_match() {
-            println!("enter_sequence! {:?}", self.current_path);
             self.output.push(OutputStackFrame::list());
         }
         self.state.push(State::Sequence(
@@ -244,13 +238,11 @@ impl QueryExecutor {
             NextStep::IsMatch(_) => true,
         };
         if should_enter {
-            println!("enter_index {}", index);
             self.current_path.push(QueryElement::array_item(index));
         }
         should_enter
     }
     fn exit_index(&mut self, index: usize) {
-        println!("{:?} {:?}", self.current_path, self.state);
         let top = self.current_path.pop();
         debug_assert_eq!(Some(QueryElement::array_item(index)), top);
     }
@@ -274,7 +266,6 @@ impl QueryExecutor {
     }
     fn enter_map(&mut self) {
         if self.is_match() {
-            println!("enter_map! {:?}", self.current_path);
             self.output.push(OutputStackFrame::map());
         }
         self.state.push(State::StartMap);
@@ -532,7 +523,6 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
         self.enter_map();
         self.must_enter_name(variant);
         self.enter_sequence(Some(len));
-        println!("enter_tuple_variant");
         Ok(self)
     }
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
@@ -687,10 +677,6 @@ impl<'a> serde::ser::SerializeStructVariant for &'a mut QueryExecutor {
     fn end(self) -> Result<Self::Ok, Self::Error> {
         self.exit_map();
         self.exit_name(None);
-        println!(
-            "exit_struct_variant: {:?}, {:?}",
-            self.state, self.current_path
-        );
         Ok(())
     }
 }
