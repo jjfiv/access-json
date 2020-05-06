@@ -109,7 +109,7 @@ pub struct QueryExecutor {
     output: Vec<OutputStackFrame>,
 }
 impl QueryExecutor {
-    pub fn new(query: &JSONQuery) -> Result<Self, QueryExecError> {
+    pub fn new(query: &JSONQuery) -> Result<Self, QueryExecErr> {
         Ok(Self {
             query: query.elements.clone(),
             current_path: Vec::new(),
@@ -143,7 +143,7 @@ impl QueryExecutor {
     fn is_match(&self) -> bool {
         self.relative_path().is_some()
     }
-    fn possible_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecError> {
+    fn possible_result(&mut self, found: &dyn AnySerializable) -> Result<(), QueryExecErr> {
         if self.is_match() {
             let output_frame = self.output.last_mut().unwrap();
             match self.state.last().unwrap() {
@@ -209,7 +209,7 @@ impl QueryExecutor {
             length.expect("All sequences have lengths?"),
         ));
     }
-    fn sequence_element<T: ?Sized>(&mut self, value: &T) -> Result<(), QueryExecError>
+    fn sequence_element<T: ?Sized>(&mut self, value: &T) -> Result<(), QueryExecErr>
     where
         T: serde::ser::Serialize,
     {
@@ -246,7 +246,7 @@ impl QueryExecutor {
         let top = self.current_path.pop();
         debug_assert_eq!(Some(QueryElement::array_item(index)), top);
     }
-    fn exit_sequence(&mut self) -> Result<(), QueryExecError> {
+    fn exit_sequence(&mut self) -> Result<(), QueryExecErr> {
         if self.is_match() {
             // pop output stack and treat it as a value!
             let top = self.output.pop().unwrap();
@@ -258,7 +258,7 @@ impl QueryExecutor {
                 debug_assert_eq!(pos, len);
                 Ok(())
             }
-            found => Err(QueryExecError::InternalError(format!(
+            found => Err(QueryExecErr::InternalError(format!(
                 "Bad exit_sequence state: {:?}",
                 found
             ))),
@@ -282,11 +282,11 @@ impl QueryExecutor {
     fn enter_map_key(&mut self) {
         self.state.push(State::MapKey);
     }
-    fn exit_map_key(&mut self) -> Result<(), QueryExecError> {
+    fn exit_map_key(&mut self) -> Result<(), QueryExecErr> {
         // Leave MapKeyStr on state stack!
         match self.state.last() {
             Some(State::MapKeyStr(_)) => Ok(()),
-            _ => Err(QueryExecError::InternalError(format!(
+            _ => Err(QueryExecErr::InternalError(format!(
                 "Map key not a simple String! {:?}",
                 self.current_path
             ))),
@@ -302,11 +302,11 @@ impl QueryExecutor {
         };
         self.state.push(State::MapValue);
     }
-    fn exit_map_value(&mut self) -> Result<(), QueryExecError> {
+    fn exit_map_value(&mut self) -> Result<(), QueryExecErr> {
         match self.state.pop() {
             Some(State::MapValue) => {}
             actual => {
-                return Err(QueryExecError::InternalError(format!(
+                return Err(QueryExecErr::InternalError(format!(
                     "Expected MapValue state, found: {:?}",
                     actual
                 )))
@@ -317,7 +317,7 @@ impl QueryExecutor {
                 self.exit_name(Some(&name));
             }
             actual => {
-                return Err(QueryExecError::InternalError(format!(
+                return Err(QueryExecErr::InternalError(format!(
                     "Expected MapKeyStr state, found: {:?}",
                     actual
                 )))
@@ -325,7 +325,7 @@ impl QueryExecutor {
         }
         match self.state.pop() {
             Some(State::MapKey) => Ok(()),
-            actual => Err(QueryExecError::InternalError(format!(
+            actual => Err(QueryExecErr::InternalError(format!(
                 "Expected MapKey state, found: {:?}",
                 actual
             ))),
@@ -333,26 +333,31 @@ impl QueryExecutor {
     }
 }
 
+/// An enum representing a runtime error given a correctly-parsed query.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub enum QueryExecError {
+pub enum QueryExecErr {
+    /// You gave us a query that has no fields or array accesses in it.
+    /// Just call serde_json::to_value instead of going through the query API!
     EmptyQuery,
+    /// Basically a panic; please open a [github issue](https://github.com/jjfiv/access-json/issues), with data if possible!
     InternalError(String),
+    /// Since we're currently implementing a serde Serializer to run the queries, we need a catch-all for custom errors, e.g., in user-specified serialization targets.
     Serialization(String),
 }
 
-impl From<serde_json::Error> for QueryExecError {
+impl From<serde_json::Error> for QueryExecErr {
     fn from(err: serde_json::Error) -> Self {
         Self::InternalError(format!("{:?}", err))
     }
 }
 
-impl std::fmt::Display for QueryExecError {
+impl std::fmt::Display for QueryExecErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)?;
         Ok(())
     }
 }
-impl std::error::Error for QueryExecError {
+impl std::error::Error for QueryExecErr {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }
@@ -364,19 +369,19 @@ impl std::error::Error for QueryExecError {
     }
 }
 
-impl serde::ser::Error for QueryExecError {
+impl serde::ser::Error for QueryExecErr {
     fn custom<T>(msg: T) -> Self
     where
         T: std::fmt::Display,
     {
         // Note: erased_serde brings us here on error.
-        QueryExecError::Serialization(msg.to_string())
+        QueryExecErr::Serialization(msg.to_string())
     }
 }
 
 impl<'a> serde::Serializer for &'a mut QueryExecutor {
     type Ok = ();
-    type Error = QueryExecError;
+    type Error = QueryExecErr;
 
     type SerializeSeq = Self;
     type SerializeTuple = Self;
@@ -429,11 +434,11 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
                 self.must_enter_name(v);
                 Ok(())
             }
-            Some(State::MapKeyStr(_)) => Err(QueryExecError::InternalError(
+            Some(State::MapKeyStr(_)) => Err(QueryExecErr::InternalError(
                 "Shouldn't see multiple str for the same key!".into(),
             )),
             Some(_) => self.possible_result(&v),
-            Option::None => Err(QueryExecError::InternalError(
+            Option::None => Err(QueryExecErr::InternalError(
                 "&str value with no state!".into(),
             )),
         }
@@ -551,7 +556,7 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
 
 impl<'a> serde::ser::SerializeSeq for &'a mut QueryExecutor {
     type Ok = ();
-    type Error = QueryExecError;
+    type Error = QueryExecErr;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
@@ -566,7 +571,7 @@ impl<'a> serde::ser::SerializeSeq for &'a mut QueryExecutor {
 
 impl<'a> serde::ser::SerializeMap for &'a mut QueryExecutor {
     type Ok = ();
-    type Error = QueryExecError;
+    type Error = QueryExecErr;
     fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
@@ -594,7 +599,7 @@ impl<'a> serde::ser::SerializeMap for &'a mut QueryExecutor {
 
 impl<'a> serde::ser::SerializeTuple for &'a mut QueryExecutor {
     type Ok = ();
-    type Error = QueryExecError;
+    type Error = QueryExecErr;
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
@@ -607,7 +612,7 @@ impl<'a> serde::ser::SerializeTuple for &'a mut QueryExecutor {
 }
 impl<'a> serde::ser::SerializeTupleStruct for &'a mut QueryExecutor {
     type Ok = ();
-    type Error = QueryExecError;
+    type Error = QueryExecErr;
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
@@ -620,7 +625,7 @@ impl<'a> serde::ser::SerializeTupleStruct for &'a mut QueryExecutor {
 }
 impl<'a> serde::ser::SerializeTupleVariant for &'a mut QueryExecutor {
     type Ok = ();
-    type Error = QueryExecError;
+    type Error = QueryExecErr;
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
@@ -636,7 +641,7 @@ impl<'a> serde::ser::SerializeTupleVariant for &'a mut QueryExecutor {
 }
 impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
     type Ok = ();
-    type Error = QueryExecError;
+    type Error = QueryExecErr;
     fn serialize_field<T: ?Sized>(
         &mut self,
         key: &'static str,
@@ -659,7 +664,7 @@ impl<'a> serde::ser::SerializeStruct for &'a mut QueryExecutor {
 
 impl<'a> serde::ser::SerializeStructVariant for &'a mut QueryExecutor {
     type Ok = ();
-    type Error = QueryExecError;
+    type Error = QueryExecErr;
     fn serialize_field<T: ?Sized>(
         &mut self,
         key: &'static str,

@@ -1,16 +1,6 @@
 use crate::query::QueryElement;
 
-/// This is the main entry point for parsing our simple query language into a structured format.
-///
-/// ```
-/// use access_json::query::QueryElement;
-/// use access_json::parse_query;
-///
-/// assert_eq!(
-///   parse_query(".field.array[8]").unwrap(),
-///   vec![QueryElement::field("field"), QueryElement::field("array"), QueryElement::array_item(8)]);
-/// ```
-pub fn parse_query(input: &str) -> Result<Vec<QueryElement>, QueryParseErr> {
+pub(crate) fn parse_query(input: &str) -> Result<Vec<QueryElement>, QueryParseErr> {
     let mut output = Vec::new();
     let mut parser = Parser::from(input);
     while let Some(it) = parser.next()? {
@@ -19,15 +9,26 @@ pub fn parse_query(input: &str) -> Result<Vec<QueryElement>, QueryParseErr> {
     Ok(output)
 }
 
+/// An enum representing errors possible while parsing a query.
+///
+/// All ``usize`` fields in these errors represent the character index where the parser detected the failure.
 #[derive(Debug, PartialEq, Eq, Clone, Serialize)]
 pub enum QueryParseErr {
+    /// Each parsable element must start with '.' or '['
     BadCharacter(usize),
+    /// Need a field name; encountered a ".." in the query.
     MissingField,
+    /// Need a number; encountered a "[]" in the query.
     MissingNumber(usize),
+    /// Got some kind of non-decimal digit inside the brackets "[]".
     BadArray(usize),
+    /// Got some kind of bad character (or whitespace) inside a '.'
     BadField(usize),
+    /// Reached the end of the string while looking for a specific character (probably ']')
     UnexpectedEOF(char),
+    /// Found a strange character at the given position.
     Unexpected(usize, char),
+    /// Could not parse the number in your brackets to a usize. String is the IntError in question.
     BadIndex(usize, String),
 }
 
