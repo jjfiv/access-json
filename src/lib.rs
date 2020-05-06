@@ -272,4 +272,61 @@ mod tests {
                 .unwrap()
         );
     }
+
+    #[test]
+    fn test_list_of_lists() {
+        let data = vec![
+            vec![vec![1, 2, 3], vec![4, 5, 6]],
+            vec![vec![7, 8, 9], vec![10, 11, 12]],
+        ];
+
+        assert_eq!(
+            serde_json::to_value(&vec![vec![1, 2, 3], vec![4, 5, 6]]).unwrap(),
+            JSONQuery::parse("[0]")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        )
+    }
+
+    #[derive(Debug, PartialEq, Eq, Serialize)]
+    struct UnitStruct;
+
+    #[test]
+    fn test_unit_struct() {
+        let nothings = vec![UnitStruct, UnitStruct];
+        assert_eq!(
+            serde_json::to_value(&UnitStruct).unwrap(),
+            JSONQuery::parse("[0]")
+                .unwrap()
+                .execute(&nothings)
+                .unwrap()
+                .unwrap()
+        )
+    }
+
+    #[derive(Debug, PartialEq, Eq, Serialize)]
+    struct NewType(i32);
+
+    #[test]
+    fn test_newtype_struct() {
+        let data = vec![NewType(-2), NewType(3)];
+        assert_eq!(
+            -2,
+            JSONQuery::parse("[0]")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            3,
+            JSONQuery::parse("[1]")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        )
+    }
 }

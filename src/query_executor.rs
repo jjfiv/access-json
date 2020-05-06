@@ -462,12 +462,10 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
         self.possible_result(&serde_json::Value::Null)
     }
-    fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-        if self.enter_name(name) {
-            self.serialize_unit()?;
-            self.exit_name(Some(name));
-        }
-        Ok(())
+
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+        // see test_unit_struct
+        self.serialize_unit()
     }
 
     fn serialize_unit_variant(
@@ -489,8 +487,8 @@ impl<'a> serde::Serializer for &'a mut QueryExecutor {
     where
         T: serde::Serialize,
     {
-        // TODO test ignoring names of newtype structs; e.g.,
-        // struct Meters(f64) is serialized as jus ta f64 and we don't care about the name of that type...?
+        // See test_newtype_struct:
+        // struct Meters(f64) is serialized as just a f64 and we don't care about the name of that type...?
         value.serialize(&mut *self)
     }
     fn serialize_newtype_variant<T: ?Sized>(
