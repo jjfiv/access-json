@@ -360,6 +360,27 @@ mod tests {
                 .unwrap()
         );
     }
+    
+    #[test]
+    fn test_array_as_root() {
+        let data = &[Point(1, 2), Point(3, 4)];
+        assert_eq!(
+            serde_json::to_value(vec![1, 2]).unwrap(),
+            JSONQuery::parse("[0]")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            4,
+            JSONQuery::parse("[1][1]")
+                .unwrap()
+                .execute(&data)
+                .unwrap()
+                .unwrap()
+        );
+    }
 
     #[test]
     fn test_list_of_lists() {
